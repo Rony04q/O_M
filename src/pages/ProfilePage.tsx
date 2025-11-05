@@ -1,232 +1,191 @@
-import { useState, useEffect } from "react";
+// src/pages/ProfilePage.tsx
+import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { useNavigate, Link } from 'react-router-dom';
-import { User, Edit, Briefcase, Users, Settings, Truck, Package, MinusCircle } from "lucide-react"; // Added missing Truck, Package icons
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
-import { RealtimeChannel } from "@supabase/supabase-js";
-import { format, addDays } from "date-fns";
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
-// --- TYPE DEFINITIONS (Cleaned and Corrected) ---
-type UserProfileData = { id: string; full_name: string | null; email: string | null; role: string | null; address: string | null; } | null;
-
-type EditableProfile = { 
-    full_name: string; 
-    roll_number: string; 
-    department: string; 
-    cgpa: string; 
+// Type for the user's profile
+type UserProfile = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  role: string | null;
 };
 
-type FetchedOrder = {
-    id: string;
-    order_date: string;
-    total_amount: number;
-    status: string;
-    // Assuming you added delivery_date to orders table
-    delivery_date?: string | null; 
-    // Nested relation for order items
-    order_items: Array<{
-      quantity: number;
-      price_at_purchase: number;
-      products: { name: string; image_url: string; } | null;
-    }>;
+// Type for a single item in an order
+type OrderItem = {
+  name: string;
+  quantity: number;
+  price: number;
+  image_url: string | null;
 };
-// --- END TYPE DEFINITIONS ---
 
-// --- START COMPONENT ---
-const ProfilePage = () => {
-  // Profile & Auth States
-  const [profile, setProfile] = useState<UserProfileData>(null);
+// Type for a full order, matching our SQL function
+type Order = {
+  id: string;
+  created_at: string;
+  total_price: number;
+  payment_mode: string;
+  payment_status: string;
+  delivery_status: string;
+  items: OrderItem[];
+};
+
+export default function ProfilePage() {
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
-  const [isEditing, setIsEditing] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [editableProfile, setEditableProfile] = useState<EditableProfile>({ full_name: '', roll_number: '', department: '', cgpa: '', });
 
-  // Role-Specific Data States
-  const [userOrders, setUserOrders] = useState<FetchedOrder[]>([]); // For customer
-  const [sellerListings, setSellerListings] = useState<any[]>([]); // For seller
-  const [loadingRoleData, setLoadingRoleData] = useState(true);
-
-  // Admin/Seller Stats (for overview cards)
-  const [jobCount, setJobCount] = useState<number>(0);
-  const [applicantCount, setApplicantCount] = useState<number>(0);
-
-
-  // --- Helper to fetch role-specific data (Orders/Listings) ---
-  const fetchRoleData = async (userId: string, role: string) => {
-    setLoadingRoleData(true);
-    try {
-      if (role === 'customer') {
-        // Fetch Customer Order History
-        const { data: ordersData, error: orderError } = await supabase
-            .from('orders')
-            .select(`
-                *, 
-                order_items ( 
-                    quantity, 
-                    price_at_purchase,
-                    products ( name, image_url ) 
-                )
-            `)
-            .eq('customer_id', userId)
-            .order('order_date', { ascending: false });
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      
+      // 1. Get the user's profile data
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single();
         
-        if (orderError) throw orderError;
-        setUserOrders(ordersData || []);
-
-      } else if (role === 'seller') {
-        // Fetch Seller Product Listings
-        const { data: productsData, error: productError } = await supabase
-            .from('products')
-            .select(`
-                *,
-                order_items(count)
-            `)
-            .eq('seller_id', userId);
-        
-        if (productError) throw productError;
-        setSellerListings(productsData || []);
+        if (profileError) console.error('Error fetching profile:', profileError);
+        else setProfile(profileData);
       }
-    } catch (error) {
-      console.error("Error fetching role-specific data:", error);
-    } finally {
-      setLoadingRoleData(false);
+
+      // 2. Get the user's order history
+      // (This requires the 'get_my_orders' SQL function)
+      const { data: ordersData, error: ordersError } = await supabase.rpc('get_my_orders');
+      
+      if (ordersError) {
+        console.error('Error fetching orders:', ordersError);
+      } else if (ordersData) {
+        setOrders(ordersData);
+      }
+
+      setLoading(false);
+    };
+
+    fetchData();
+  }, []);
+
+  if (loading) {
+    return <div className="container mx-auto p-4">Loading your profile...</div>;
+  }
+
+  if (!profile) {
+    return <div className="container mx-auto p-4">Could not load profile. Are you logged in?</div>;
+  }
+
+  // Helper function to format the date
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  };
+
+  // Helper to format delivery status with colors
+  const getStatusBadge = (status: string) => {
+    switch (status.toLowerCase()) {
+      case 'shipped':
+        return <Badge variant="default" className="bg-blue-500 text-white">{status}</Badge>;
+      case 'delivered':
+        return <Badge variant="default" className="bg-green-600 text-white">{status}</Badge>;
+      case 'cancelled':
+        return <Badge variant="destructive">{status}</Badge>;
+      case 'pending':
+      default:
+        return <Badge variant="outline">{status}</Badge>;
     }
   };
 
-
-  // --- Main useEffect to fetch profile ---
-  useEffect(() => {
-    async function fetchProfile() {
-      // Fetch user and profile logic...
-    }
-    // Placeholder to call role data fetch after profile is set:
-    if (profile) {
-        fetchRoleData(profile.id, profile.role || 'customer');
-    }
-  }, [navigate, profile?.id, profile?.role]); 
-  
-  // (All handler functions remain the same)
-
-  // --- RENDERING ---
-  if (loading) { return <div className="p-8">Loading profile...</div>; }
-  
   return (
-    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-12">
-      
-      {/* === MY PROFILE SECTION (Common for both roles) === */}
-      <section>
-        <h2 className="text-3xl font-bold mb-6">My Profile</h2>
-        {/* --- Card with Personal Information and Edit/Save Logic --- */}
-        {/* (The JSX for the card form is very large and omitted for brevity here, but must be included in your file) */}
-      </section>
+    <main className="container mx-auto p-4 md:p-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        
+        {/* Column 1: Profile Details */}
+        <div className="md:col-span-1">
+          <Card>
+            <CardHeader>
+              <CardTitle>My Profile</CardTitle>
+              <CardDescription>View and manage your account details.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label htmlFor="fullName">Full Name</Label>
+                <Input id="fullName" value={profile.full_name || ''} readOnly />
+              </div>
+              <div>
+                <Label htmlFor="email">Email</Label>
+                <Input id="email" type="email" value={profile.email || ''} readOnly />
+              </div>
+              <div>
+                <Label htmlFor="role">Account Type</Label>
+                <Input id="role" value={profile.role || 'customer'} readOnly 
+                  className="capitalize"
+                />
+              </div>
+              <Button className="w-full" variant="outline" disabled>Edit Profile</Button>
+            </CardContent>
+          </Card>
+        </div>
 
-      {/* === CONDITIONAL SECTIONS BASED ON ROLE === */}
-
-      {/* --- CUSTOMER SECTION (Order History) --- */}
-      {profile?.role === 'customer' && (
-        <section>
-          <h2 className="text-3xl font-bold mb-6">Order History</h2>
-          {loadingRoleData ? (
-            <p className="text-gray-500">Loading your orders...</p>
-          ) : userOrders.length === 0 ? (
-            <p className="text-gray-500">You have no past orders.</p>
+        {/* Column 2: Order History */}
+        <div className="md:col-span-2">
+          <h2 className="text-2xl font-bold mb-4">My Order History</h2>
+          {orders.length === 0 ? (
+            <p>You haven't placed any orders yet.</p>
           ) : (
             <div className="space-y-6">
-                {userOrders.map((order) => (
-                    <Card key={order.id} className="border-l-4 border-emerald-600 shadow-md">
-                        <CardHeader className="flex flex-row justify-between items-center py-3">
-                            <h3 className="font-semibold text-lg">Order #{order.id.substring(0, 8).toUpperCase()}</h3>
-                            <span className={`px-3 py-1 text-xs rounded-full font-medium ${
-                                order.status === 'shipped' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                            }`}>
-                                {order.status.toUpperCase()}
-                            </span>
-                        </CardHeader>
-                        <CardContent className="pt-4 grid md:grid-cols-3 gap-4">
-                            <div>
-                                <p className="text-sm font-medium text-gray-700">Order Date</p>
-                                <p className="text-sm">{format(new Date(order.order_date), 'MMM dd, yyyy')}</p>
-                            </div>
-                            <div>
-                                <p className="text-sm font-medium text-gray-700">Expected Delivery</p>
-                                <p className="text-sm text-emerald-600 font-semibold">
-                                    <Truck className="inline h-4 w-4 mr-1" />
-                                    {format(addDays(new Date(order.order_date), 5), 'MMM dd, yyyy')}
-                                </p>
-                            </div>
-                            <div className="md:col-span-1">
-                                <p className="text-sm font-medium text-gray-700">Total</p>
-                                <p className="text-xl font-bold text-gray-900">
-                                    {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(order.total_amount)}
-                                </p>
-                            </div>
-                            {/* Order Items List */}
-                            <div className="md:col-span-3 border-t pt-4">
-                                <h4 className="text-sm font-medium mb-2">Items Purchased:</h4>
-                                <ul className="space-y-2">
-                                    {order.order_items.map(item => (
-                                        <li key={item.products?.name} className="flex items-center gap-3">
-                                            <Package className="h-4 w-4 text-emerald-600" />
-                                            <span className="text-sm">{item.products?.name}</span>
-                                            <span className="text-xs text-gray-500">x{item.quantity}</span>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        </CardContent>
-                    </Card>
-                ))}
+              {orders.map((order) => (
+                <Card key={order.id}>
+                  <CardHeader className="flex flex-row justify-between items-center">
+                    <div>
+                      <CardTitle className="text-lg">Order #{order.id.split('-')[0]}</CardTitle>
+                      <CardDescription>Placed on {formatDate(order.created_at)}</CardDescription>
+                    </div>
+                    {getStatusBadge(order.delivery_status)}
+                  </CardHeader>
+                  <CardContent>
+                    <ul className="divide-y divide-gray-200">
+                      {order.items.map((item) => (
+                        <li key={item.name} className="py-4 flex">
+                          <img 
+                            src={item.image_url || 'https://via.placeholder.com/64'} 
+                            alt={item.name} 
+                            className="h-16 w-16 rounded-md object-cover mr-4"
+                          />
+                          <div className="flex-1">
+                            <h4 className="font-semibold">{item.name}</h4>
+                            <p className="text-sm text-gray-500">Quantity: {item.quantity}</p>
+                          </div>
+                          <p className="font-semibold">
+                            ${(item.price * item.quantity).toFixed(2)}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="border-t pt-4 mt-4 flex justify-between items-center">
+                      <div className="text-sm">
+                        <span className="text-gray-500">Payment Status: </span>
+                        <span className="font-medium capitalize">{order.payment_status}</span>
+                      </div>
+                      <div className="text-lg font-bold">
+                        Total: ${order.total_price.toFixed(2)}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
           )}
-        </section>
-      )}
-
-      {/* --- SELLER SECTION --- */}
-      {profile?.role === 'seller' && (
-        <section className="space-y-8">
-          <h2 className="text-3xl font-bold mb-6">Seller Portal</h2>
-          
-          {/* Seller Product Listings */}
-          <h3 className="text-2xl font-bold mb-4">My Current Listings</h3>
-          {loadingRoleData ? (
-            <p>Loading listings...</p>
-          ) : sellerListings.length === 0 ? (
-            <p>You have no products listed. <Link to="/seller/add-product" className="text-emerald-600 hover:underline">Add one now.</Link></p>
-          ) : (
-            <div className="bg-white rounded-lg shadow-sm border overflow-x-auto">
-                <Table className="min-w-[800px]">
-                    <TableHeader><TableRow>{/* ... Headers ... */}</TableRow></TableHeader>
-                    <TableBody>
-                        {sellerListings.map(product => (
-                            <TableRow key={product.id}>
-                                <TableCell className="font-medium">{product.name}</TableCell>
-                                <TableCell>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(product.price)}</TableCell>
-                                <TableCell>{product.stock_quantity}</TableCell>
-                                <TableCell>{product.order_items[0]?.count || 0} Orders</TableCell>
-                                <TableCell className="text-right space-x-2">
-                                    <Link to={`/seller/edit-product/${product.id}`}>
-                                        <Button variant="outline" size="sm"><Edit className="h-4 w-4" /> Edit</Button>
-                                    </Link>
-                                    <Button variant="destructive" size="sm"><MinusCircle className="h-4 w-4" /> Delete</Button>
-                                </TableCell>
-                            </TableRow>
-                        ))}
-                    </TableBody>
-                </Table>
-            </div>
-          )}
-        </section>
-      )}
-
+        </div>
+      </div>
     </main>
   );
-};
-
-export default ProfilePage;
+}

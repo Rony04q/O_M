@@ -63,7 +63,7 @@ export function Login() {
 
         // Sign in successful
         console.log('Sign in successful:', data);
-        navigate('/'); // Navigate to home page
+        window.location.assign('/'); // Force a full page reload
       }
     } catch (error: any) {
       console.error('Authentication error:', error.message);

@@ -7,6 +7,9 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 
+// --- IMPORT THE NEW SERVICE ---
+import { generateEmbedding } from '../lib/geminiEmbeddings';
+
 export default function AddProduct() {
   const navigate = useNavigate();
   const [name, setName] = useState('');
@@ -22,7 +25,6 @@ export default function AddProduct() {
     setLoading(true);
     setError(null);
 
-    // 1. Get the current user
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -31,19 +33,30 @@ export default function AddProduct() {
       return;
     }
 
-    // 2. Create the new product object
-    // Note: Supabase handles string-to-number conversion for 'price'
-    // and 'stock_quantity' if the input is valid.
+    // 1. Combine text for AI
+    const combinedText = `${name}. ${description}`;
+
+    // 2. Generate the Embedding (AI step)
+    const embeddingVector = await generateEmbedding(combinedText);
+    
+    if (!embeddingVector) {
+        setError("AI Service failed to generate product embedding. Product not added.");
+        setLoading(false);
+        return;
+    }
+
+    // 3. Create the new product object (including the embedding)
     const newProduct = {
       name,
       description,
       price: parseFloat(price),
       stock_quantity: parseInt(stockQuantity, 10),
-      image_url: imageUrl || null, // Use null if the string is empty
-      seller_id: user.id, // This is the crucial link
+      image_url: imageUrl || null,
+      seller_id: user.id,
+      embedding: embeddingVector, // <-- SEND THE GEMINI VECTOR
     };
 
-    // 3. Insert into the database
+    // 4. Insert into the database
     const { error: insertError } = await supabase
       .from('products')
       .insert(newProduct);
@@ -54,7 +67,7 @@ export default function AddProduct() {
       console.error('Error adding product:', insertError.message);
       setError(insertError.message);
     } else {
-      // Success! Clear form and go back to the dashboard.
+      // Success!
       setName('');
       setDescription('');
       setPrice('');
@@ -64,6 +77,7 @@ export default function AddProduct() {
     }
   };
 
+  // ... rest of the return statement (JSX) remains the same
   return (
     <div className="max-w-2xl mx-auto">
       <div className="bg-white p-6 rounded-lg shadow-md">
@@ -143,7 +157,7 @@ export default function AddProduct() {
 
           <div className="pt-2">
             <Button type="submit" disabled={loading} className="w-full">
-              {loading ? 'Adding Product...' : 'Add Product'}
+              {loading ? 'Generating Embedding & Adding Product...' : 'Add Product'}
             </Button>
           </div>
         </form>

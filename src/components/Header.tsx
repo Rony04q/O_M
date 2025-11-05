@@ -1,8 +1,15 @@
 import { useNavigate, Link } from 'react-router-dom'; // <-- Added Link
-import { ShoppingCart, Search, Menu, LogOut, User } from 'lucide-react'; // <-- Added LogOut, User
+import { ShoppingCart, Search, Menu, LogOut, User, Archive, LayoutDashboard } from 'lucide-react'; // <-- Added LogOut, User
 import { Button } from '@/components/ui/button'; // Assuming Button component exists
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'; // Assuming Avatar components exist
-
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 // --- Define UserProfile Type (or import from AppRouter/types) ---
 // Make sure this matches the structure provided by AppRouter
 type UserProfile = {
@@ -71,34 +78,49 @@ export function Header({
             {/* --- Conditional Rendering for Auth --- */}
             {userProfile ? (
               // If logged in, show user info and logout
-              <>
-                {/* User Avatar/Name - Conditionally link to profile or seller dashboard */}
-                <Link
-                  to={userProfile.role === 'seller' ? '/seller' : '/profile'} // Example: Link to different dashboards based on role
-                  className="hidden md:flex items-center gap-2 p-1 rounded-lg hover:bg-gray-100 transition-colors"
-                  title="View Profile/Dashboard"
-                >
-                   <Avatar className="h-8 w-8">
-                      <AvatarFallback className="bg-emerald-100 text-emerald-700 text-xs font-semibold">
-                         {getInitials(userProfile.full_name)}
+              // --- 3. REPLACED LINK/BUTTON WITH DROPDOWN ---
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" className="relative h-10 w-10 rounded-full">
+                    <Avatar className="h-9 w-9">
+                      <AvatarFallback className="bg-emerald-100 text-emerald-700 font-semibold">
+                        {getInitials(userProfile.full_name)}
                       </AvatarFallback>
-                   </Avatar>
-                   <div className="flex flex-col text-left">
-                     <span className="text-sm font-medium text-gray-800 leading-tight">{userProfile.full_name || 'User'}</span>
-                     <span className="text-xs text-gray-500 leading-tight capitalize">{userProfile.role || 'Customer'}</span>
-                   </div>
-                </Link>
-                {/* Logout Button */}
-                <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={onLogout} // Use the passed logout handler
-                    className="hidden md:flex items-center gap-1.5"
-                 >
-                   <LogOut className="w-4 h-4" />
-                   Logout
-                 </Button>
-              </>
+                    </Avatar>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-56" align="end" forceMount>
+                  <DropdownMenuLabel className="font-normal">
+                    <div className="flex flex-col space-y-1">
+                      <p className="text-sm font-medium leading-none">{userProfile.full_name}</p>
+                      <p className="text-xs leading-none text-muted-foreground">{userProfile.email}</p>
+                    </div>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  
+                  {/* These are the new links */}
+                  <DropdownMenuItem onSelect={() => navigate('/profile')}>
+                    <User className="mr-2 h-4 w-4" />
+                    <span>My Profile</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => navigate('/profile')}>
+                    <Archive className="mr-2 h-4 w-4" />
+                    <span>My Orders</span>
+                  </DropdownMenuItem>
+                  
+                  {userProfile.role === 'seller' && (
+                    <DropdownMenuItem onSelect={() => navigate('/seller')}>
+                      <LayoutDashboard className="mr-2 h-4 w-4" />
+                      <span>Seller Dashboard</span>
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={onLogout}>
+                    <LogOut className="mr-2 h-4 w-4" />
+                    <span>Log out</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             ) : (
               // If not logged in, show Sign In link
               <Link
