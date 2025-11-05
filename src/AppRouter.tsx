@@ -1,5 +1,6 @@
 // src/AppRouter.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } // <-- IMPORT useRef
+  from 'react';
 import { Routes, Route, useNavigate } from 'react-router-dom';
 import { supabase } from './lib/supabaseClient';
 import { Header } from './components/Header';
@@ -8,11 +9,17 @@ import { Home } from './pages/Home';
 import { ProductDetails } from './pages/ProductDetails';
 import { Login } from './pages/Login';
 import { Checkout } from './pages/Checkout';
-import { Product as BoltProductType, CartItem } from './types'; // Use updated types
+import { Product as BoltProductType, CartItem } from './types';
+import SellerOrders from './pages/SellerOrders'; // <-- 1. IMPORT THIS
+
+// --- IMPORT SELLER PAGES ---
+import SellerLayout from './pages/SellerLayout';
+import SellerDashboard from './pages/SellerDashboard';
+import AddProduct from './pages/AddProduct';
 
 // Type for products fetched from Supabase
 type FetchedProduct = {
-  id: string; // Original string UUID
+  id: string;
   name: string;
   description: string;
   price: number;
@@ -32,7 +39,6 @@ type UserProfile = {
 
 
 export function AppRouter() {
-  // --- States ---
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -40,30 +46,75 @@ export function AppRouter() {
   const [session, setSession] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<UserProfile>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
+  
+  // --- ADD THIS REEFERENCE ---
+  // This ref will prevent the auth logic from running twice in StrictMode
+  const authEffectHasRun = useRef(false);
 
-  // --- NEW SAFE useEffect to handle auth state changes ---
   useEffect(() => {
-    const handleAuth = async () => {
-      // 1. Get initial session with safety check
-      const { data: sessionData } = await supabase.auth.getSession();
-      const session = sessionData?.session; // Use optional chaining for safety
+    // --- THIS IS THE FIX ---
+    // Only run the auth logic ONCE, even in StrictMode
+    if (authEffectHasRun.current === true) {
+      return; // Stop the second execution
+    }
+    authEffectHasRun.current = true; // Mark as run
+    // -----------------------
 
-      setSession(session);
-      if (session?.user) {
-        fetchProfile(session.user.id);
-      } else {
-        setLoadingAuth(false);
+
+    // 1. Define fetchProfile *inside* useEffect
+    const fetchProfile = async (userId: string) => {
+      console.log("AppRouter: Fetching profile...");
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, full_name, email, role')
+          .eq('id', userId)
+          .single();
+        if (error && error.code !== 'PGRST116') throw error;
+        setUserProfile(data || null);
+      } catch (error: any) {
+        console.error("Error fetching profile:", error.message);
+        setUserProfile(null);
+      } finally {
+        console.log("AppRouter: Auth loading finished.");
+        setLoadingAuth(false); 
+      }
+    };
+
+    // 2. Define the main auth handler
+    const handleAuth = async () => {
+      console.log("AppRouter: Calling handleAuth...");
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        console.log("AppRouter: Got session data.");
+        
+        const session = sessionData?.session;
+        setSession(session);
+        
+        if (session?.user) {
+          console.log("AppRouter: User found, fetching profile.");
+          await fetchProfile(session.user.id);
+        } else {
+          console.log("AppRouter: No user, setting loading to false.");
+          setLoadingAuth(false);
+        }
+      } catch (error: any) {
+        console.error("AppRouter Auth ERROR:", error.message);
+        setLoadingAuth(false); 
       }
     };
     
-    handleAuth(); // Run once initially
+    handleAuth(); // Run the check on initial load
 
-    // 2. Listen for future auth changes (login/logout)
+    // 3. Listen for future auth changes
+    console.log("AppRouter: Setting up auth state listener...");
     const { data: authListener } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
+        console.log("AppRouter: Auth state changed.", _event);
         setSession(session);
         if (session?.user) {
-          fetchProfile(session.user.id);
+          setLoadingAuth(true); // Show loader while we fetch new profile
+          await fetchProfile(session.user.id);
         } else {
           setUserProfile(null);
           setLoadingAuth(false);
@@ -71,47 +122,64 @@ export function AppRouter() {
       }
     );
 
-    // 3. Cleanup listener on component unmount
+    // 4. Cleanup listener
     return () => {
+      console.log("AppRouter: Cleaning up auth listener.");
       authListener?.subscription?.unsubscribe();
     };
-  }, []); // Run only once on mount
+  }, []); // Empty dependency array is correct
 
-  // --- fetchProfile Function (Unchanged) ---
-  const fetchProfile = async (userId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, full_name, email, role')
-        .eq('id', userId)
-        .single();
-      if (error && error.code !== 'PGRST116') throw error;
-      setUserProfile(data);
-    } catch (error: any) {
-      console.error("Error fetching profile:", error.message);
-      setUserProfile(null);
-    } finally {
-      setLoadingAuth(false);
-    }
+  // --- handleLogout Function ---
+    const handleLogout = async () => {
+        const { error } = await supabase.auth.signOut();
+        if (error) console.error("Error logging out:", error);
+        else {
+            setUserProfile(null);
+            navigate('/login');
+        }
+    };
+
+  // --- clearCart Function ---
+  const clearCart = () => {
+      setCartItems([]);
   };
 
-  // --- Logout, Cart Logic, etc. (Remain the same) ---
-  const handleLogout = async () => { /* ... existing logic ... */ };
-  const clearCart = () => { /* ... existing logic ... */ };
-  const addToCart = (productToAdd: FetchedProduct, quantityToAdd: number = 1) => { /* ... existing logic ... */ };
-  const updateQuantity = (id: number, quantity: number) => { /* ... existing logic ... */ };
-  const removeFromCart = (id: number) => { /* ... existing logic ... */ };
-  
+  // --- addToCart Function (Placeholder) ---
+    const addToCart = (productToAdd: FetchedProduct, quantityToAdd: number = 1) => { 
+        console.log("Add to cart (placeholder)", productToAdd, quantityToAdd);
+    };
+
+  // --- updateQuantity Function (Placeholder) ---
+  const updateQuantity = (id: number, quantity: number) => { 
+    console.log("Update quantity (placeholder)", id, quantity);
+  };
+
+  // --- removeFromCart Function ---
+  const removeFromCart = (id: number) => { 
+    setCartItems((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  // cartCount Calculation
   const cartCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
 
   // Loading indicator
-  if (loadingAuth) { return <div>Loading Application...</div>; }
+  if (loadingAuth) { return <div className="min-h-screen flex items-center justify-center">Loading Application...</div>; }
 
   // --- JSX ---
   return (
     <>
       <Routes>
         <Route path="/login" element={<Login />} />
+        
+        {/* --- SELLER ROUTES --- */}
+        <Route path="/seller" element={<SellerLayout />}>
+          <Route index element={<SellerDashboard />} />
+          <Route path="products" element={<SellerDashboard />} />
+          <Route path="add-product" element={<AddProduct />} />
+          <Route path="orders" element={<SellerOrders />} /> {/* <-- 2. ADD THIS ROUTE */}
+        </Route>
+
+        {/* --- CUSTOMER ROUTES --- */}
         <Route
           path="/*"
           element={
@@ -125,9 +193,9 @@ export function AppRouter() {
                 onSearchChange={setSearchQuery}
               />
               <Routes>
-                 <Route path="/" element={ <Home cartItems={cartItems} addToCart={addToCart} searchQuery={searchQuery} /> } />
-                 <Route path="/product/:productId" element={<ProductDetails onAddToCart={addToCart} />} />
-                 <Route path="/checkout" element={<Checkout cartItems={cartItems} clearCart={clearCart} />} />
+                  <Route path="/" element={ <Home cartItems={cartItems} addToCart={addToCart} searchQuery={searchQuery} /> } />
+                  <Route path="/product/:productId" element={<ProductDetails onAddToCart={addToCart} />} />
+                  <Route path="/checkout" element={<Checkout cartItems={cartItems} clearCart={clearCart} />} />
               </Routes>
               <Cart
                 isOpen={isCartOpen}
@@ -139,6 +207,7 @@ export function AppRouter() {
             </>
           }
         />
+        
       </Routes>
     </>
   );

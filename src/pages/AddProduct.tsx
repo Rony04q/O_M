@@ -1,182 +1,153 @@
-import { useState, useEffect } from 'react';
+// src/pages/AddProduct.tsx
+import { useState } from 'react';
+import { supabase } from '../lib/supabaseClient';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient'; 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea"; 
-import { Package, DollarSign } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 
-// Type for the form data
-type ProductFormData = {
-  name: string;
-  description: string;
-  price: string; 
-  stock_quantity: string;
-  image_url: string;
-  category: string;
-};
-
-// Assuming category options based on previous data insert
-const CATEGORIES = ["Electronics", "Fashion", "Sports", "Home", "Accessories"];
-
-const AddProduct = () => {
+export default function AddProduct() {
   const navigate = useNavigate();
-  const [formData, setFormData] = useState<ProductFormData>({
-    name: '',
-    description: '',
-    price: '',
-    stock_quantity: '',
-    image_url: '',
-    category: CATEGORIES[0], 
-  });
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [sellerId, setSellerId] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [price, setPrice] = useState('');
+  const [stockQuantity, setStockQuantity] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // --- 1. Fetch Seller ID on load ---
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        setSellerId(user.id);
-      } else {
-        navigate('/login');
-      }
-    });
-  }, [navigate]);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-  };
-
-  // --- 2. Handle Form Submission to Supabase ---
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!sellerId) {
-      alert("Seller ID missing. Please log in again.");
+    setLoading(true);
+    setError(null);
+
+    // 1. Get the current user
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      setError('You must be logged in to add a product.');
+      setLoading(false);
       return;
     }
-    setIsSubmitting(true);
 
-    try {
-      // Validate and prepare data for database
-      const priceNumeric = parseFloat(formData.price);
-      const stockNumeric = parseInt(formData.stock_quantity);
+    // 2. Create the new product object
+    // Note: Supabase handles string-to-number conversion for 'price'
+    // and 'stock_quantity' if the input is valid.
+    const newProduct = {
+      name,
+      description,
+      price: parseFloat(price),
+      stock_quantity: parseInt(stockQuantity, 10),
+      image_url: imageUrl || null, // Use null if the string is empty
+      seller_id: user.id, // This is the crucial link
+    };
 
-      if (isNaN(priceNumeric) || priceNumeric <= 0 || isNaN(stockNumeric) || stockNumeric < 0) {
-        throw new Error("Please enter valid positive numbers for Price and Stock Quantity.");
-      }
+    // 3. Insert into the database
+    const { error: insertError } = await supabase
+      .from('products')
+      .insert(newProduct);
 
-      const { error } = await supabase
-        .from('products')
-        .insert({
-          name: formData.name,
-          description: formData.description,
-          price: priceNumeric,
-          stock_quantity: stockNumeric,
-          image_url: formData.image_url || null,
-          category: formData.category,
-          seller_id: sellerId, // <-- Automatically link to current seller
-        });
+    setLoading(false);
 
-      if (error) throw error;
-
-      alert(`Product "${formData.name}" listed successfully!`);
-      // Navigate to the seller's product listing view
-      navigate('/seller/products');
-      
-    } catch (error: any) {
-      console.error("Error adding product:", error.message);
-      alert(`Failed to add product: ${error.message}`);
-    } finally {
-      setIsSubmitting(false);
+    if (insertError) {
+      console.error('Error adding product:', insertError.message);
+      setError(insertError.message);
+    } else {
+      // Success! Clear form and go back to the dashboard.
+      setName('');
+      setDescription('');
+      setPrice('');
+      setStockQuantity('');
+      setImageUrl('');
+      navigate('/seller/products'); // Go to product list
     }
   };
 
-  if (!sellerId) {
-    return <div className="p-8 text-center text-gray-600">Loading Seller details...</div>;
-  }
-
   return (
-    <div className="max-w-4xl mx-auto py-8">
-      <h1 className="text-3xl font-bold mb-6">List a New Product</h1>
-      <div className="bg-white rounded-lg shadow-xl p-6">
-        <form onSubmit={handleSubmit} className="space-y-6">
-
-          {/* Product Name & Category */}
-          <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="name">Product Name</Label>
-              <Input
-                type="text" name="name" value={formData.name} onChange={handleChange}
-                placeholder="e.g., Ultra-Comfort Headphones" required
-              />
-            </div>
-            <div>
-              <Label htmlFor="category">Category</Label>
-              <select
-                id="category" name="category" value={formData.category} onChange={handleChange}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
-              >
-                {CATEGORIES.map((cat) => (
-                  <option key={cat} value={cat}>{cat}</option>
-                ))}
-              </select>
-            </div>
+    <div className="max-w-2xl mx-auto">
+      <div className="bg-white p-6 rounded-lg shadow-md">
+        <h1 className="text-2xl font-bold text-gray-800 mb-6">
+          Add a New Product
+        </h1>
+        
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <Label htmlFor="name">Product Name</Label>
+            <Input
+              id="name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              className="mt-1"
+            />
           </div>
 
-          {/* Description */}
           <div>
             <Label htmlFor="description">Description</Label>
             <Textarea
-              name="description" value={formData.description} onChange={handleChange}
-              placeholder="Detailed description, features, and specifications." rows={4} required
+              id="description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="mt-1"
             />
           </div>
 
-          {/* Price & Stock */}
-          <div className="grid md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label htmlFor="price">Price (₹)</Label>
-              <div className="relative">
-                 <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                 <Input
-                    type="text" name="price" value={formData.price} onChange={handleChange}
-                    placeholder="e.g., 2999" required min="0" step="0.01"
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
-                  />
-              </div>
+              <Label htmlFor="price">Price ($)</Label>
+              <Input
+                id="price"
+                type="number"
+                step="0.01"
+                min="0"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+                required
+                className="mt-1"
+              />
             </div>
             <div>
-              <Label htmlFor="stock_quantity">Stock Quantity</Label>
-              <div className="relative">
-                <Package className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <Input
-                  type="number" name="stock_quantity" value={formData.stock_quantity} onChange={handleChange}
-                  placeholder="e.g., 50" required min="0"
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
-                />
-              </div>
+              <Label htmlFor="stock">Stock Quantity</Label>
+              <Input
+                id="stock"
+                type="number"
+                min="0"
+                step="1"
+                value={stockQuantity}
+                onChange={(e) => setStockQuantity(e.target.value)}
+                required
+                className="mt-1"
+              />
             </div>
           </div>
 
-          {/* Image URL */}
           <div>
-            <Label htmlFor="image_url">Image URL (Direct Link)</Label>
+            <Label htmlFor="image_url">Image URL (Optional)</Label>
             <Input
-              type="url" name="image_url" value={formData.image_url} onChange={handleChange}
-              placeholder="https://via.placeholder.com/300"
+              id="image_url"
+              type="url"
+              value={imageUrl}
+              onChange={(e) => setImageUrl(e.target.value)}
+              placeholder="https://example.com/image.png"
+              className="mt-1"
             />
           </div>
 
-          {/* Submit Button */}
-          <Button type="submit" disabled={isSubmitting} className="w-full py-3">
-            {isSubmitting ? 'Listing Product...' : 'Publish Product'}
-          </Button>
+          {error && (
+            <p className="text-sm font-medium text-red-600">
+              Error: {error}
+            </p>
+          )}
+
+          <div className="pt-2">
+            <Button type="submit" disabled={loading} className="w-full">
+              {loading ? 'Adding Product...' : 'Add Product'}
+            </Button>
+          </div>
         </form>
       </div>
     </div>
   );
-};
-
-export default AddProduct;
+}
